@@ -1,71 +1,122 @@
-/*
-Raylib example file.
-This is an example main file for a simple raylib project.
-Use this as a starting point or replace it with your code.
-
-For a C++ project simply rename the file to .cpp and re-run the build script 
-
--- Copyright (c) 2020-2024 Jeffery Myers
---
---This software is provided "as-is", without any express or implied warranty. In no event 
---will the authors be held liable for any damages arising from the use of this software.
-
---Permission is granted to anyone to use this software for any purpose, including commercial 
---applications, and to alter it and redistribute it freely, subject to the following restrictions:
-
---  1. The origin of this software must not be misrepresented; you must not claim that you 
---  wrote the original software. If you use this software in a product, an acknowledgment 
---  in the product documentation would be appreciated but is not required.
---
---  2. Altered source versions must be plainly marked as such, and must not be misrepresented
---  as being the original software.
---
---  3. This notice may not be removed or altered from any source distribution.
-
-*/
-
 #include "raylib.h"
+#include "raymath.h"
+#include "resource_dir.h"
+#include <stdlib.h>
 
-#include "resource_dir.h"	// utility header for SearchAndSetResourceDir
+#define MAX_ENEMIES 50
+#define PARTICLE_COUNT 1000
+#define FLT_MAX 1000
+
+typedef struct {
+    Vector2 position;
+    bool active;
+} Enemy;
+
+typedef struct {
+    Vector2 position;
+    Color color;
+} Particle;
 
 int main ()
 {
-	// Tell the window to use vysnc and work on high DPI displays
-	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
+    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
+    InitWindow(1280, 800, "P.N.01");
+    SearchAndSetResourceDir("resources");
 
-	// Create the window and OpenGL context
-	InitWindow(1280, 800, "Hello Raylib");
+    Vector2 playAreaCenter = { 0, 0 };
+    Vector2 playerPosition = playAreaCenter;
+    Vector2 playerDirection = { 0, 0 };
+    float playerSpeed = 5.0f;
+    float playerRadius = 20.0f;
 
-	// Utility function from resource_dir.h to find the resources folder and set it as the current working directory so we can load from it
-	SearchAndSetResourceDir("resources");
+    Enemy enemies[MAX_ENEMIES] = { 0 };
+    int enemyCount = 0;
+    float enemySpeed = 3.0f;
 
-	// Load a texture from the resources directory
-	Texture wabbit = LoadTexture("wabbit_alpha.png");
-	
-	// game loop
-	while (!WindowShouldClose())		// run the loop untill the user presses ESCAPE or presses the Close button on the window
-	{
-		// drawing
-		BeginDrawing();
+    Particle particles[PARTICLE_COUNT] = { 0 };
+    for (int i = 0; i < PARTICLE_COUNT; i++) {
+        particles[i].position = (Vector2){ GetRandomValue(-640, 640), GetRandomValue(-400, 400) };
+        particles[i].color = DARKGRAY;
+    }
 
-		// Setup the backbuffer for drawing (clear color and depth buffers)
-		ClearBackground(BLACK);
+    Camera2D camera = { 0 };
+    camera.target = playAreaCenter;
+    camera.offset = (Vector2){ GetScreenWidth() / 2.0f, GetScreenHeight() / 2.0f };
+    camera.zoom = 1.0f;
 
-		// draw some text using the default font
-		DrawText("Hello Raylib", 200,200,20,WHITE);
+    while (!WindowShouldClose())
+    {
+        playerDirection.x = IsKeyDown(KEY_D) - IsKeyDown(KEY_A);
+        playerDirection.y = IsKeyDown(KEY_S) - IsKeyDown(KEY_W);
+        playerDirection = Vector2Normalize(playerDirection);
+        playerDirection = Vector2Scale(playerDirection, playerSpeed);
+        
+        playerPosition.x += playerDirection.x;
+        playerPosition.y += playerDirection.y;
 
-		// draw our texture to the screen
-		DrawTexture(wabbit, 400, 200, WHITE);
-		
-		// end the frame and get ready for the next one  (display frame, poll input, etc...)
-		EndDrawing();
-	}
+        if (playerPosition.x < -640 + playerRadius) playerPosition.x = -640 + playerRadius;
+        if (playerPosition.x > 640 - playerRadius) playerPosition.x = 640 - playerRadius;
+        if (playerPosition.y < -400 + playerRadius) playerPosition.y = -400 + playerRadius;
+        if (playerPosition.y > 400 - playerRadius) playerPosition.y = 400 - playerRadius;
 
-	// cleanup
-	// unload our texture so it can be cleaned up
-	UnloadTexture(wabbit);
+        camera.target = Vector2Lerp(camera.target, playerPosition, 0.1f);
 
-	// destory the window and cleanup the OpenGL context
-	CloseWindow();
-	return 0;
+        if (enemyCount < MAX_ENEMIES && GetRandomValue(0, 100) < 2) {
+            enemies[enemyCount].position = (Vector2){ playerPosition.x + GetRandomValue(-800, 800), playerPosition.y + GetRandomValue(-600, 600) };
+            enemies[enemyCount].active = true;
+            enemyCount++;
+        }
+
+        for (int i = 0; i < enemyCount; i++) {
+            if (enemies[i].active) {
+                Vector2 enemyDirection = Vector2Subtract(playerPosition, enemies[i].position);
+                enemyDirection = Vector2Normalize(enemyDirection);
+                enemyDirection = Vector2Scale(enemyDirection, enemySpeed);
+                enemies[i].position = Vector2Add(enemies[i].position, enemyDirection);
+            }
+        }
+
+        if (enemyCount > 0) {
+            int nearestEnemyIndex = -1;
+            float nearestDistance = FLT_MAX;
+            for (int i = 0; i < enemyCount; i++) {
+                if (enemies[i].active) {
+                    float distance = Vector2Distance(playerPosition, enemies[i].position);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestEnemyIndex = i;
+                    }
+                }
+            }
+
+            if (nearestEnemyIndex != -1) {
+                enemies[nearestEnemyIndex].active = false;
+            }
+        }
+
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        BeginMode2D(camera);
+
+        DrawRectangleLines(-640, -400, 1280, 800, WHITE);
+
+        for (int i = 0; i < PARTICLE_COUNT; i++) {
+            DrawPixelV(particles[i].position, particles[i].color);
+        }
+
+        DrawCircleV(playerPosition, playerRadius, WHITE);
+
+        for (int i = 0; i < enemyCount; i++) {
+            if (enemies[i].active) {
+                DrawCube((Vector3){enemies[i].position.x, enemies[i].position.y, 0}, 40, 40, 40, RED);
+            }
+        }
+
+        EndMode2D();
+        EndDrawing();
+    }
+
+    CloseWindow();
+    return 0;
 }
